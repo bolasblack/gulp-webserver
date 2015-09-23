@@ -7,7 +7,7 @@ var serveStatic = require('serve-static');
 var connectLivereload = require('connect-livereload');
 var proxy = require('proxy-middleware');
 var tinyLr = require('tiny-lr');
-var watch = require('watch');
+var chokidar = require('chokidar');
 var fs = require('fs');
 var serveIndex = require('serve-index');
 var path = require('path');
@@ -158,26 +158,30 @@ module.exports = function(options) {
 
   // Create server
   var stream = through.obj(function(file, enc, callback) {
+    var watcher, watchOptions = {
+      ignored: /[\/\\]\./
+    }
 
     app.use(config.path, serveStatic(file.path));
 
     if (config.livereload.enable) {
-      var watchOptions = {
-        ignoreDotFiles: true,
-        filter: config.livereload.filter
-      };
-      watch.watchTree(file.path, watchOptions, function (filename) {
-        lrServer.changed({
-          body: {
-            files: filename
-          }
-        });
-
-      });
+      chokidar.watch(file.path, watchOptions)
+        .on('add', livereloadChangedFile)
+        .on('change', livereloadChangedFile)
+        .on('unlink', livereloadChangedFile);
     }
 
     this.push(file);
     callback();
+
+    function livereloadChangedFile(filepath) {
+      if (!config.livereload.filter(filepath)) { return; }
+      lrServer.changed({
+        body: {
+          files: filepath
+        }
+      });
+    }
   })
   .on('data', function(f){files.push(f);})
   .on('end', function(){
